@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 import enum
 from datetime import datetime
 
-DATABASE_URL = 'sqlite+aiosqlite:///db.sqlite3'
+DATABASE_URL = 'postgresql+asyncpg://botadmin:12345678@postgres:5432/playex_db'
 engine = create_async_engine(url=DATABASE_URL, echo=True)
 async_session = async_sessionmaker(bind=engine, expire_on_commit=False)
 
