@@ -87,11 +87,25 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# ===== ИНИЦИАЛИЗАЦИЯ ТАБЛИЦ =====
+# ===== ИНИЦИАЛИЗАЦИЯ ТАБЛИЦ С RETRY =====
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print("✅ Таблицы созданы успешно")
+    max_retries = 30
+    retry_count = 0
+
+    while retry_count < max_retries:
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            print("✅ Таблицы созданы успешно")
+            return
+        except Exception as e:
+            retry_count += 1
+            if retry_count < max_retries:
+                print(f"⏳ Ожидание БД... попытка {retry_count}/{max_retries}. Ошибка: {str(e)[:50]}")
+                await asyncio.sleep(2)
+            else:
+                print(f"❌ Не удалось создать таблицы после {max_retries} попыток")
+                raise
 
 
 @app.on_event("startup")
