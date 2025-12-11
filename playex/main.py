@@ -3,24 +3,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, create_engine
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import uvicorn
 
 # ===== DATABASE =====
 DATABASE_URL = "postgresql+asyncpg://botadmin:12345678@postgres:5432/playex_db"
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_async_engine(DATABASE_URL, echo=False)
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
 
 # ===== FASTAPI =====
@@ -112,46 +113,8 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class UserResponse(BaseModel):
-    tg_id: int
-    name: str
-    points: int
-    solved_count: int
-
-
-class ProblemResponse(BaseModel):
-    id: int
-    title: str
-    description: str
-    points: int
-    difficulty: str
-    subject: str
-    category_id: int
-
-
-class CategoryResponse(BaseModel):
-    id: int
-    name: str
-    description: str
-    subject: str
-
-
-class StatsResponse(BaseModel):
-    tg_id: int
-    name: str
-    points: int
-    solved_count: int
-    solved_problems: List[int]
-
-
 class TaskRequest(BaseModel):
     title: str
-
-
-class TaskResponse(BaseModel):
-    id: int
-    title: str
-    is_completed: bool
 
 
 # ===== ROUTES =====
@@ -164,11 +127,15 @@ async def health_check():
 
 # ===== USERS =====
 @app.post('/api/users/register')
-async def register(data: RegisterRequest, db: Session = Depends(get_db)):
+async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Регистрация нового пользователя"""
     try:
+        from sqlalchemy import select
+
         # Проверяем, существует ли уже
-        existing = db.query(User).filter(User.tg_id == data.tg_id).first()
+        result = await db.execute(select(User).filter(User.tg_id == data.tg_id))
+        existing = result.scalars().first()
+
         if existing:
             print(f'⚠️ Пользователь {data.tg_id} уже существует')
             return {
@@ -181,8 +148,7 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db)):
         # Создаём нового пользователя
         user = User(tg_id=data.tg_id, name=data.name)
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
 
         print(f'✅ Пользователь {data.tg_id} зарегистрирован')
         return {
@@ -192,16 +158,20 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db)):
             "message": "Успешно зарегистрирован"
         }
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         print(f'❌ Ошибка регистрации: {e}')
         raise HTTPException(status_code=500, detail=f'Ошибка: {str(e)}')
 
 
 @app.get('/api/users/{tg_id}')
-async def get_user(tg_id: int, db: Session = Depends(get_db)):
+async def get_user(tg_id: int, db: AsyncSession = Depends(get_db)):
     """Получить пользователя по tg_id"""
     try:
-        user = db.query(User).filter(User.tg_id == tg_id).first()
+        from sqlalchemy import select
+
+        result = await db.execute(select(User).filter(User.tg_id == tg_id))
+        user = result.scalars().first()
+
         if not user:
             raise HTTPException(status_code=404, detail='Пользователь не найден')
 
@@ -217,10 +187,14 @@ async def get_user(tg_id: int, db: Session = Depends(get_db)):
 
 
 @app.get('/api/profile/{tg_id}')
-async def get_profile(tg_id: int, db: Session = Depends(get_db)):
+async def get_profile(tg_id: int, db: AsyncSession = Depends(get_db)):
     """Получить профиль пользователя"""
     try:
-        user = db.query(User).filter(User.tg_id == tg_id).first()
+        from sqlalchemy import select
+
+        result = await db.execute(select(User).filter(User.tg_id == tg_id))
+        user = result.scalars().first()
+
         if not user:
             raise HTTPException(status_code=404, detail='Пользователь не найден')
 
@@ -237,11 +211,9 @@ async def get_profile(tg_id: int, db: Session = Depends(get_db)):
 
 
 @app.post('/api/login/')
-async def login(data: LoginRequest, db: Session = Depends(get_db)):
+async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Вход по email и пароль"""
     try:
-        # Здесь добавьте логику проверки email/пароля
-        # Это заглушка - адаптируйте под вашу систему
         print(f'🔐 Попытка входа: {data.email}')
         raise HTTPException(status_code=401, detail='Некорректные данные')
     except Exception as e:
@@ -251,14 +223,18 @@ async def login(data: LoginRequest, db: Session = Depends(get_db)):
 
 # ===== CATEGORIES =====
 @app.get('/api/categories/')
-async def get_categories(subject: Optional[str] = None, db: Session = Depends(get_db)):
+async def get_categories(subject: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """Получить категории"""
     try:
-        query = db.query(Category)
+        from sqlalchemy import select
+
+        query = select(Category)
         if subject:
             query = query.filter(Category.subject == subject)
 
-        categories = query.all()
+        result = await db.execute(query)
+        categories = result.scalars().all()
+
         return [
             {
                 "id": cat.id,
@@ -279,11 +255,13 @@ async def get_problems(
         subject: Optional[str] = None,
         difficulty: Optional[str] = None,
         category_id: Optional[int] = None,
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     """Получить задачи"""
     try:
-        query = db.query(Problem)
+        from sqlalchemy import select
+
+        query = select(Problem)
 
         if subject:
             query = query.filter(Problem.subject == subject)
@@ -292,7 +270,9 @@ async def get_problems(
         if category_id:
             query = query.filter(Problem.category_id == category_id)
 
-        problems = query.all()
+        result = await db.execute(query)
+        problems = result.scalars().all()
+
         return [
             {
                 "id": p.id,
@@ -314,16 +294,19 @@ async def get_problems(
 async def get_random_problem(
         subject: str,
         category_id: Optional[int] = None,
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     """Получить случайную задачу"""
     try:
-        query = db.query(Problem).filter(Problem.subject == subject)
+        from sqlalchemy import select, func
+
+        query = select(Problem).filter(Problem.subject == subject)
         if category_id:
             query = query.filter(Problem.category_id == category_id)
 
-        from sqlalchemy import func
-        problem = query.order_by(func.random()).first()
+        query = query.order_by(func.random())
+        result = await db.execute(query)
+        problem = result.scalars().first()
 
         if not problem:
             raise HTTPException(status_code=404, detail='Задач не найдено')
@@ -344,12 +327,14 @@ async def get_random_problem(
 
 # ===== SOLVE PROBLEM =====
 @app.post('/api/solve/')
-async def solve_problem(data: SolveProblemRequest, db: Session = Depends(get_db)):
+async def solve_problem(data: SolveProblemRequest, db: AsyncSession = Depends(get_db)):
     """
     Решить задачу
     - Если tg_id = None, то гость (не сохраняем прогресс, только проверяем)
     - Если tg_id = число, то авторизованный пользователь (сохраняем прогресс)
     """
+    from sqlalchemy import select
+
     problem_id = data.problem_id
     user_answer = data.user_answer.strip()
     tg_id = data.tg_id
@@ -358,7 +343,8 @@ async def solve_problem(data: SolveProblemRequest, db: Session = Depends(get_db)
 
     # Получаем задачу
     try:
-        problem = db.query(Problem).filter(Problem.id == problem_id).first()
+        result = await db.execute(select(Problem).filter(Problem.id == problem_id))
+        problem = result.scalars().first()
     except Exception as e:
         print(f'❌ Ошибка БД при получении задачи: {e}')
         raise HTTPException(status_code=500, detail=f'Ошибка БД: {str(e)}')
@@ -375,11 +361,14 @@ async def solve_problem(data: SolveProblemRequest, db: Session = Depends(get_db)
     if tg_id is not None:
         try:
             # Проверяем, не решал ли уже
-            existing = db.query(UserSolution).filter(
-                UserSolution.tg_id == tg_id,
-                UserSolution.problem_id == problem_id,
-                UserSolution.is_correct == True
-            ).first()
+            result = await db.execute(
+                select(UserSolution).filter(
+                    UserSolution.tg_id == tg_id,
+                    UserSolution.problem_id == problem_id,
+                    UserSolution.is_correct == True
+                )
+            )
+            existing = result.scalars().first()
 
             if existing:
                 print(f'⚠️ Пользователь {tg_id} уже решал задачу {problem_id}')
@@ -402,13 +391,15 @@ async def solve_problem(data: SolveProblemRequest, db: Session = Depends(get_db)
                 db.add(solution)
 
                 # Обновляем статистику пользователя
-                user = db.query(User).filter(User.tg_id == tg_id).first()
+                result = await db.execute(select(User).filter(User.tg_id == tg_id))
+                user = result.scalars().first()
+
                 if user:
                     user.points += problem.points
                     user.solved_count += 1
                     print(f'📊 Обновлена статистика пользователя {tg_id}: +{problem.points} очков')
 
-                db.commit()
+                await db.commit()
 
                 return SolveProblemResponse(
                     correct=True,
@@ -423,7 +414,7 @@ async def solve_problem(data: SolveProblemRequest, db: Session = Depends(get_db)
                     message='Неправильно'
                 )
         except Exception as e:
-            db.rollback()
+            await db.rollback()
             print(f'❌ Ошибка при сохранении: {e}')
             raise HTTPException(status_code=500, detail=f'Ошибка: {str(e)}')
     else:
@@ -438,19 +429,25 @@ async def solve_problem(data: SolveProblemRequest, db: Session = Depends(get_db)
 
 # ===== STATS =====
 @app.get('/api/stats/{tg_id}')
-async def get_stats(tg_id: int, db: Session = Depends(get_db)):
+async def get_stats(tg_id: int, db: AsyncSession = Depends(get_db)):
     """Получить статистику пользователя"""
     try:
-        user = db.query(User).filter(User.tg_id == tg_id).first()
+        from sqlalchemy import select
+
+        result = await db.execute(select(User).filter(User.tg_id == tg_id))
+        user = result.scalars().first()
+
         if not user:
             raise HTTPException(status_code=404, detail='Пользователь не найден')
 
         # Получаем решённые задачи
-        solved = db.query(UserSolution).filter(
-            UserSolution.tg_id == tg_id,
-            UserSolution.is_correct == True
-        ).all()
-
+        result = await db.execute(
+            select(UserSolution).filter(
+                UserSolution.tg_id == tg_id,
+                UserSolution.is_correct == True
+            )
+        )
+        solved = result.scalars().all()
         solved_problems = [s.problem_id for s in solved]
 
         return {
@@ -467,10 +464,14 @@ async def get_stats(tg_id: int, db: Session = Depends(get_db)):
 
 # ===== TASKS =====
 @app.get('/api/tasks/{tg_id}')
-async def get_tasks(tg_id: int, db: Session = Depends(get_db)):
+async def get_tasks(tg_id: int, db: AsyncSession = Depends(get_db)):
     """Получить задачи пользователя"""
     try:
-        tasks = db.query(Task).filter(Task.tg_id == tg_id).all()
+        from sqlalchemy import select
+
+        result = await db.execute(select(Task).filter(Task.tg_id == tg_id))
+        tasks = result.scalars().all()
+
         return [
             {
                 "id": t.id,
@@ -485,13 +486,12 @@ async def get_tasks(tg_id: int, db: Session = Depends(get_db)):
 
 
 @app.post('/api/tasks')
-async def create_task(data: TaskRequest, tg_id: int, db: Session = Depends(get_db)):
+async def create_task(data: TaskRequest, tg_id: int, db: AsyncSession = Depends(get_db)):
     """Создать задачу"""
     try:
         task = Task(tg_id=tg_id, title=data.title)
         db.add(task)
-        db.commit()
-        db.refresh(task)
+        await db.commit()
 
         return {
             "id": task.id,
@@ -499,21 +499,25 @@ async def create_task(data: TaskRequest, tg_id: int, db: Session = Depends(get_d
             "is_completed": task.is_completed
         }
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         print(f'❌ Ошибка создания задачи: {e}')
         raise HTTPException(status_code=500, detail=f'Ошибка: {str(e)}')
 
 
 @app.patch('/api/tasks/{task_id}/complete')
-async def complete_task(task_id: int, db: Session = Depends(get_db)):
+async def complete_task(task_id: int, db: AsyncSession = Depends(get_db)):
     """Завершить задачу"""
     try:
-        task = db.query(Task).filter(Task.id == task_id).first()
+        from sqlalchemy import select
+
+        result = await db.execute(select(Task).filter(Task.id == task_id))
+        task = result.scalars().first()
+
         if not task:
             raise HTTPException(status_code=404, detail='Задача не найдена')
 
         task.is_completed = True
-        db.commit()
+        await db.commit()
 
         return {
             "id": task.id,
@@ -521,25 +525,29 @@ async def complete_task(task_id: int, db: Session = Depends(get_db)):
             "is_completed": task.is_completed
         }
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         print(f'❌ Ошибка завершения задачи: {e}')
         raise HTTPException(status_code=500, detail=f'Ошибка: {str(e)}')
 
 
 @app.delete('/api/tasks/{task_id}')
-async def delete_task(task_id: int, db: Session = Depends(get_db)):
+async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
     """Удалить задачу"""
     try:
-        task = db.query(Task).filter(Task.id == task_id).first()
+        from sqlalchemy import select
+
+        result = await db.execute(select(Task).filter(Task.id == task_id))
+        task = result.scalars().first()
+
         if not task:
             raise HTTPException(status_code=404, detail='Задача не найдена')
 
-        db.delete(task)
-        db.commit()
+        await db.delete(task)
+        await db.commit()
 
         return {"message": "Задача удалена"}
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         print(f'❌ Ошибка удаления задачи: {e}')
         raise HTTPException(status_code=500, detail=f'Ошибка: {str(e)}')
 
