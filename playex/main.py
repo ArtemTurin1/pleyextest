@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 import uvicorn
 
 from models import (
@@ -104,6 +104,35 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
     except Exception as e:
         await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== ЛОГИН =====
+@app.post('/api/login/')
+async def login(data: dict, db: AsyncSession = Depends(get_db)):
+    """Вход через Email"""
+    try:
+        email = data.get('email')
+        password = data.get('password')
+
+        if not email or not password:
+            raise HTTPException(status_code=400, detail='Укажите email и пароль')
+
+        result = await db.execute(select(User).filter(User.email == email))
+        user = result.scalars().first()
+
+        if not user or user.password_hash != password:
+            raise HTTPException(status_code=401, detail='Неверный email или пароль')
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "points": user.points,
+            "message": "Успешно вошли"
+        }
+
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -287,13 +316,16 @@ async def get_random_problem(subject: str, category_id: int = None, db: AsyncSes
 @app.post('/api/solve/')
 async def solve_problem(
     data: SolveProblemRequest,
-    tg_id: int = None,
-    email: str = None,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Решить задачу (TG / Email / Гость)"""
     problem_id = data.problem_id
     user_answer = data.user_answer.strip()
+
+    # Получаем ID из заголовков
+    tg_id = request.headers.get('X-TG-ID')
+    email = request.headers.get('X-EMAIL')
 
     # Получаем задачу
     result = await db.execute(select(Problem).filter(Problem.id == problem_id))
@@ -318,7 +350,7 @@ async def solve_problem(
         if tg_id:
             result = await db.execute(
                 select(UserSolution).filter(
-                    UserSolution.tg_id == tg_id,
+                    UserSolution.tg_id == int(tg_id),
                     UserSolution.problem_id == problem_id,
                     UserSolution.is_correct == True
                 )
@@ -343,7 +375,7 @@ async def solve_problem(
 
         if correct:
             solution = UserSolution(
-                tg_id=tg_id,
+                tg_id=int(tg_id) if tg_id else None,
                 email=email,
                 problem_id=problem_id,
                 user_answer=user_answer,
@@ -353,7 +385,7 @@ async def solve_problem(
 
             # Обновляем статистику пользователя
             if tg_id:
-                user_result = await db.execute(select(User).filter(User.tg_id == tg_id))
+                user_result = await db.execute(select(User).filter(User.tg_id == int(tg_id)))
             else:
                 user_result = await db.execute(select(User).filter(User.email == email))
 
