@@ -9,7 +9,7 @@ from datetime import datetime
 import uvicorn
 
 # ===== DATABASE =====
-DATABASE_URL = "postgresql://user:12345678@playex_postgres:5432/playex_db"
+DATABASE_URL = "postgresql+asyncpg://botadmin:12345678@postgres:5432/playex_db"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
