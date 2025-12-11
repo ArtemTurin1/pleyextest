@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 import uvicorn
 
 from models import (
@@ -40,37 +40,77 @@ async def health_check():
     return {"status": "ok"}
 
 
+# ===== РЕГИСТРАЦИЯ =====
 @app.post('/api/users/register')
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """Регистрация через TG или Email"""
     try:
-        result = await db.execute(select(User).filter(User.tg_id == data.tg_id))
-        existing = result.scalars().first()
+        # Регистрация через Telegram
+        if data.tg_id:
+            result = await db.execute(select(User).filter(User.tg_id == data.tg_id))
+            existing = result.scalars().first()
 
-        if existing:
+            if existing:
+                return {
+                    "id": existing.id,
+                    "tg_id": existing.tg_id,
+                    "name": existing.name,
+                    "points": existing.points,
+                    "message": "Уже зарегистрирован"
+                }
+
+            user = User(tg_id=data.tg_id, name=data.name)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+
             return {
-                "tg_id": existing.tg_id,
-                "name": existing.name,
-                "points": existing.points,
-                "message": "Уже зарегистрирован"
+                "id": user.id,
+                "tg_id": user.tg_id,
+                "name": user.name,
+                "points": user.points,
+                "message": "Успешно зарегистрирован через Telegram"
             }
 
-        user = User(tg_id=data.tg_id, name=data.name)
-        db.add(user)
-        await db.commit()
+        # Регистрация через Email
+        elif data.email:
+            result = await db.execute(select(User).filter(User.email == data.email))
+            existing = result.scalars().first()
 
-        return {
-            "tg_id": user.tg_id,
-            "name": user.name,
-            "points": user.points,
-            "message": "Успешно зарегистрирован"
-        }
+            if existing:
+                return {
+                    "id": existing.id,
+                    "email": existing.email,
+                    "name": existing.name,
+                    "points": existing.points,
+                    "message": "Уже зарегистрирован"
+                }
+
+            user = User(email=data.email, name=data.name, password_hash=data.password)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+
+            return {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+                "points": user.points,
+                "message": "Успешно зарегистрирован через Email"
+            }
+
+        else:
+            raise HTTPException(status_code=400, detail='Укажите tg_id или email')
+
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/api/users/{tg_id}')
-async def get_user(tg_id: int, db: AsyncSession = Depends(get_db)):
+# ===== ПОЛУЧЕНИЕ ПОЛЬЗОВАТЕЛЯ =====
+@app.get('/api/users/by-tg/{tg_id}')
+async def get_user_by_tg(tg_id: int, db: AsyncSession = Depends(get_db)):
+    """Получить пользователя по TG ID"""
     try:
         result = await db.execute(select(User).filter(User.tg_id == tg_id))
         user = result.scalars().first()
@@ -79,6 +119,7 @@ async def get_user(tg_id: int, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=404, detail='Не найден')
 
         return {
+            "id": user.id,
             "tg_id": user.tg_id,
             "name": user.name,
             "points": user.points,
@@ -88,8 +129,31 @@ async def get_user(tg_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/api/profile/{tg_id}')
-async def get_profile(tg_id: int, db: AsyncSession = Depends(get_db)):
+@app.get('/api/users/by-email/{email}')
+async def get_user_by_email(email: str, db: AsyncSession = Depends(get_db)):
+    """Получить пользователя по Email"""
+    try:
+        result = await db.execute(select(User).filter(User.email == email))
+        user = result.scalars().first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail='Не найден')
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "points": user.points,
+            "solved_count": user.solved_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== ПРОФИЛЬ =====
+@app.get('/api/profile/tg/{tg_id}')
+async def get_profile_tg(tg_id: int, db: AsyncSession = Depends(get_db)):
+    """Профиль по TG"""
     try:
         result = await db.execute(select(User).filter(User.tg_id == tg_id))
         user = result.scalars().first()
@@ -98,6 +162,7 @@ async def get_profile(tg_id: int, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=404, detail='Не найден')
 
         return {
+            "id": user.id,
             "tg_id": user.tg_id,
             "name": user.name,
             "points": user.points,
@@ -108,6 +173,29 @@ async def get_profile(tg_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get('/api/profile/email/{email}')
+async def get_profile_email(email: str, db: AsyncSession = Depends(get_db)):
+    """Профиль по Email"""
+    try:
+        result = await db.execute(select(User).filter(User.email == email))
+        user = result.scalars().first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail='Не найден')
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "points": user.points,
+            "solved_count": user.solved_count,
+            "created_at": user.created_at
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== КАТЕГОРИИ =====
 @app.get('/api/categories/')
 async def get_categories(subject: str = None, db: AsyncSession = Depends(get_db)):
     try:
@@ -131,6 +219,7 @@ async def get_categories(subject: str = None, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ===== ЗАДАЧИ =====
 @app.get('/api/problems/')
 async def get_problems(
     subject: str = None,
@@ -194,11 +283,19 @@ async def get_random_problem(subject: str, category_id: int = None, db: AsyncSes
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ===== РЕШЕНИЕ ЗАДАЧ =====
 @app.post('/api/solve/')
-async def solve_problem(data: SolveProblemRequest, tg_id: int = None, db: AsyncSession = Depends(get_db)):
+async def solve_problem(
+    data: SolveProblemRequest,
+    tg_id: int = None,
+    email: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Решить задачу (TG / Email / Гость)"""
     problem_id = data.problem_id
     user_answer = data.user_answer.strip()
 
+    # Получаем задачу
     result = await db.execute(select(Problem).filter(Problem.id == problem_id))
     problem = result.scalars().first()
 
@@ -207,23 +304,34 @@ async def solve_problem(data: SolveProblemRequest, tg_id: int = None, db: AsyncS
 
     correct = user_answer.lower() == problem.correct_answer.lower()
 
-    # ГОСТЬ (tg_id = None)
-    if tg_id is None:
+    # ГОСТЬ (нет ни tg_id ни email)
+    if tg_id is None and email is None:
         return SolveProblemResponse(
             correct=correct,
             correct_answer=problem.correct_answer if not correct else '',
             message='Правильно!' if correct else 'Неправильно'
         )
 
-    # АВТОРИЗОВАННЫЙ
+    # АВТОРИЗОВАННЫЙ (TG или Email)
     try:
-        result = await db.execute(
-            select(UserSolution).filter(
-                UserSolution.tg_id == tg_id,
-                UserSolution.problem_id == problem_id,
-                UserSolution.is_correct == True
+        # Проверяем, не решал ли уже
+        if tg_id:
+            result = await db.execute(
+                select(UserSolution).filter(
+                    UserSolution.tg_id == tg_id,
+                    UserSolution.problem_id == problem_id,
+                    UserSolution.is_correct == True
+                )
             )
-        )
+        else:
+            result = await db.execute(
+                select(UserSolution).filter(
+                    UserSolution.email == email,
+                    UserSolution.problem_id == problem_id,
+                    UserSolution.is_correct == True
+                )
+            )
+
         existing = result.scalars().first()
 
         if existing:
@@ -236,13 +344,19 @@ async def solve_problem(data: SolveProblemRequest, tg_id: int = None, db: AsyncS
         if correct:
             solution = UserSolution(
                 tg_id=tg_id,
+                email=email,
                 problem_id=problem_id,
                 user_answer=user_answer,
                 is_correct=True
             )
             db.add(solution)
 
-            user_result = await db.execute(select(User).filter(User.tg_id == tg_id))
+            # Обновляем статистику пользователя
+            if tg_id:
+                user_result = await db.execute(select(User).filter(User.tg_id == tg_id))
+            else:
+                user_result = await db.execute(select(User).filter(User.email == email))
+
             user = user_result.scalars().first()
 
             if user:
@@ -267,8 +381,10 @@ async def solve_problem(data: SolveProblemRequest, tg_id: int = None, db: AsyncS
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/api/stats/{tg_id}')
-async def get_stats(tg_id: int, db: AsyncSession = Depends(get_db)):
+# ===== СТАТИСТИКА =====
+@app.get('/api/stats/tg/{tg_id}')
+async def get_stats_tg(tg_id: int, db: AsyncSession = Depends(get_db)):
+    """Статистика по TG"""
     try:
         result = await db.execute(select(User).filter(User.tg_id == tg_id))
         user = result.scalars().first()
@@ -285,6 +401,7 @@ async def get_stats(tg_id: int, db: AsyncSession = Depends(get_db)):
         solved = result.scalars().all()
 
         return {
+            "id": user.id,
             "tg_id": user.tg_id,
             "name": user.name,
             "points": user.points,
@@ -295,8 +412,40 @@ async def get_stats(tg_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/api/tasks/{tg_id}')
-async def get_tasks(tg_id: int, db: AsyncSession = Depends(get_db)):
+@app.get('/api/stats/email/{email}')
+async def get_stats_email(email: str, db: AsyncSession = Depends(get_db)):
+    """Статистика по Email"""
+    try:
+        result = await db.execute(select(User).filter(User.email == email))
+        user = result.scalars().first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail='Не найден')
+
+        result = await db.execute(
+            select(UserSolution).filter(
+                UserSolution.email == email,
+                UserSolution.is_correct == True
+            )
+        )
+        solved = result.scalars().all()
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "points": user.points,
+            "solved_count": user.solved_count,
+            "solved_problems": [s.problem_id for s in solved]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ =====
+@app.get('/api/tasks/tg/{tg_id}')
+async def get_tasks_tg(tg_id: int, db: AsyncSession = Depends(get_db)):
+    """Задачи по TG"""
     try:
         result = await db.execute(select(Task).filter(Task.tg_id == tg_id))
         tasks = result.scalars().all()
@@ -306,10 +455,38 @@ async def get_tasks(tg_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post('/api/tasks')
-async def create_task(data: TaskRequest, tg_id: int, db: AsyncSession = Depends(get_db)):
+@app.get('/api/tasks/email/{email}')
+async def get_tasks_email(email: str, db: AsyncSession = Depends(get_db)):
+    """Задачи по Email"""
+    try:
+        result = await db.execute(select(Task).filter(Task.email == email))
+        tasks = result.scalars().all()
+
+        return [{"id": t.id, "title": t.title, "is_completed": t.is_completed} for t in tasks]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/api/tasks/tg/{tg_id}')
+async def create_task_tg(tg_id: int, data: TaskRequest, db: AsyncSession = Depends(get_db)):
+    """Создать задачу для TG пользователя"""
     try:
         task = Task(tg_id=tg_id, title=data.title)
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+
+        return {"id": task.id, "title": task.title, "is_completed": task.is_completed}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/api/tasks/email/{email}')
+async def create_task_email(email: str, data: TaskRequest, db: AsyncSession = Depends(get_db)):
+    """Создать задачу для Email пользователя"""
+    try:
+        task = Task(email=email, title=data.title)
         db.add(task)
         await db.commit()
         await db.refresh(task)

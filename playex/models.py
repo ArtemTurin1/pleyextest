@@ -54,7 +54,8 @@ class UserSolution(Base):
     __tablename__ = 'user_solutions'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tg_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    tg_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    email: Mapped[str] = mapped_column(String(256), nullable=True)
     problem_id: Mapped[int] = mapped_column(ForeignKey('problems.id'), nullable=False)
     user_answer: Mapped[str] = mapped_column(String(256), nullable=False)
     is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -65,7 +66,8 @@ class Task(Base):
     __tablename__ = 'tasks'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tg_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    tg_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    email: Mapped[str] = mapped_column(String(256), nullable=True)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     is_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -73,8 +75,10 @@ class Task(Base):
 
 # ===== PYDANTIC MODELS =====
 class RegisterRequest(BaseModel):
-    tg_id: int
-    name: str
+    tg_id: Optional[int] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    password: Optional[str] = None
 
 
 class SolveProblemRequest(BaseModel):
