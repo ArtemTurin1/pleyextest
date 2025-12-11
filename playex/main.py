@@ -1,172 +1,162 @@
-from contextlib import asynccontextmanager
-from pydantic import BaseModel
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import services
-from models import init_db
+from pydantic import BaseModel
+from typing import Optional
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session
+from datetime import datetime
 
+app = FastAPI()
 
-# ==================== REQUEST MODELS ====================
-
-class SolutionRequest(BaseModel):
-    tg_id: int
-    problem_id: int
-    user_answer: str
-
-
-class RegisterRequest(BaseModel):
-    tg_id: int | None = None
-    name: str | None = None
-    email: str | None = None
-    password: str | None = None
-
-
-class TaskCreateRequest(BaseModel):
-    tg_id: int
-    title: str
-
-
-# ==================== LIFESPAN ====================
-
-@asynccontextmanager
-async def lifespan(app_: FastAPI):
-    await init_db()
-    print('Bot is ready / DB initialized')
-    yield
-
-
-app = FastAPI(title="Math & Informatics App", lifespan=lifespan)
-
+# ===== CORS =====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['*'],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# ==================== USERS / REGISTRATION ====================
-
-@app.post("/api/users/register")
-async def register_user(payload: RegisterRequest):
-    if payload.tg_id:
-        user = await services.add_user(tg_id=payload.tg_id, name=payload.name)
-        return {'id': user.id, 'tg_id': user.tg_id, 'name': user.name}
-
-    if payload.email and payload.password:
-        user = await services.register_user_via_email(payload.email, payload.password, payload.name)
-        if not user:
-            raise HTTPException(status_code=400, detail="email already exists")
-        return {'id': user.id, 'email': user.email, 'name': user.name}
-
-    raise HTTPException(status_code=400, detail="invalid payload")
+# ===== MODELS =====
+Base = declarative_base()
 
 
-@app.get("/api/users/{tg_id}")
-async def get_user_by_tg(tg_id: int):
-    user = await services.get_user_by_tg(tg_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="user not found")
-    return {
-        'id': user.id,
-        'tg_id': user.tg_id,
-        'name': user.name,
-        'score': user.score,
-        'level': user.level
-    }
+class Problem(Base):
+    __tablename__ = 'problems'
+    id = Column(Integer, primary_key=True)
+    title = Column(String)
+    description = Column(String)
+    correct_answer = Column(String)
+    points = Column(Integer, default=1)
+    difficulty = Column(String)
+    subject = Column(String)
+    category_id = Column(Integer)
 
 
-# ==================== CATEGORIES (НОВОЕ!) ====================
+class User(Base):
+    __tablename__ = 'users'
+    tg_id = Column(Integer, primary_key=True)
+    name = Column(String)
+    points = Column(Integer, default=0)
+    solved_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-@app.get("/api/categories/")
-async def get_categories(subject: str = Query(None, description="Subject filter")):
+
+class UserSolution(Base):
+    __tablename__ = 'user_solutions'
+    id = Column(Integer, primary_key=True)
+    tg_id = Column(Integer, ForeignKey('users.tg_id'))
+    problem_id = Column(Integer, ForeignKey('problems.id'))
+    user_answer = Column(String)
+    is_correct = Column(Boolean, default=False)
+    solved_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ===== PYDANTIC MODELS =====
+class SolveProblemRequest(BaseModel):
+    tg_id: Optional[int] = None
+    problem_id: int
+    user_answer: str
+
+
+class SolveProblemResponse(BaseModel):
+    correct: bool
+    correct_answer: Optional[str] = None
+    points_earned: Optional[int] = None
+    message: str
+    already_solved: Optional[bool] = False
+
+
+# ===== ROUTES =====
+@app.post('/api/solve/', response_model=SolveProblemResponse)
+async def solve_problem(data: SolveProblemRequest, db: Session = None):
     """
-    Получает категории по предмету.
-
-    Примеры:
-    - GET /api/categories/?subject=math → категории математики
-    - GET /api/categories/?subject=informatics → категории информатики
-    - GET /api/categories/ → все категории
+    Решить задачу
+    - Если tg_id = None, то гость (не сохраняем прогресс)
+    - Если tg_id = число, то авторизованный пользователь (сохраняем прогресс)
     """
-    return await services.get_categories(subject)
+    problem_id = data.problem_id
+    user_answer = data.user_answer.strip()
+    tg_id = data.tg_id
 
+    print(f'🔍 Попытка решить задачу: tg_id={tg_id}, problem_id={problem_id}, answer={user_answer}')
 
-# ==================== PROBLEMS ====================
+    # Получаем задачу
+    try:
+        problem = db.query(Problem).filter(Problem.id == problem_id).first()
+    except Exception as e:
+        print(f'❌ Ошибка БД при получении задачи: {e}')
+        raise HTTPException(status_code=500, detail=f'Ошибка БД: {str(e)}')
 
-@app.get("/api/problems/")
-async def get_problems(
-        subject: str = Query(None, description="Subject filter"),
-        difficulty: str = Query(None, description="Difficulty filter"),
-        category_id: int = Query(None, description="Category ID filter")
-):
-    """
-    Получает задачи с фильтрацией.
-
-    Примеры:
-    - GET /api/problems/?subject=math&category_id=1
-    - GET /api/problems/?subject=informatics&difficulty=hard
-    """
-    return await services.get_problems(subject, difficulty, category_id)
-
-
-@app.get("/api/problems/random/")
-async def get_random_problem(
-        subject: str = Query(..., description="Subject"),
-        category_id: int = Query(..., description="Category ID")
-):
-    """
-    Получает случайную задачу из предмета и категории.
-
-    Примеры:
-    - GET /api/problems/random/?subject=math&category_id=1
-    """
-    problem = await services.get_random_problem(subject, category_id)
     if not problem:
-        raise HTTPException(status_code=404, detail="no problems found")
-    return problem
+        print(f'❌ Задача {problem_id} не найдена')
+        raise HTTPException(status_code=404, detail='Задача не найдена')
 
+    # Проверяем ответ (case-insensitive)
+    correct = user_answer.lower() == problem.correct_answer.lower()
+    print(f'📝 Проверка ответа: "{user_answer}" vs "{problem.correct_answer}" = {correct}')
 
-# ==================== SOLVE ====================
+    # Если авторизованный пользователь - сохраняем прогресс
+    if tg_id is not None:
+        try:
+            # Проверяем, не решал ли уже
+            existing = db.query(UserSolution).filter(
+                UserSolution.tg_id == tg_id,
+                UserSolution.problem_id == problem_id,
+                UserSolution.is_correct == True
+            ).first()
 
-@app.post("/api/solve/")
-async def solve_problem(solution: SolutionRequest):
-    user = await services.add_user(tg_id=solution.tg_id)
-    result = await services.check_solution(user.id, solution.problem_id, solution.user_answer)
-    return result
+            if existing:
+                print(f'⚠️ Пользователь {tg_id} уже решал задачу {problem_id}')
+                return SolveProblemResponse(
+                    correct=False,
+                    already_solved=True,
+                    message='Вы уже решили эту задачу'
+                )
 
+            # Если правильно - сохраняем решение
+            if correct:
+                print(f'✅ Правильный ответ! Сохраняем для пользователя {tg_id}')
 
-# ==================== STATS / PROFILE ====================
+                solution = UserSolution(
+                    tg_id=tg_id,
+                    problem_id=problem_id,
+                    user_answer=user_answer,
+                    is_correct=True
+                )
+                db.add(solution)
 
-@app.get("/api/stats/{tg_id}")
-async def get_stats(tg_id: int):
-    user = await services.get_user_by_tg(tg_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="user not found")
-    stats = await services.get_user_stats(user.id)
-    return stats
+                # Обновляем статистику пользователя
+                user = db.query(User).filter(User.tg_id == tg_id).first()
+                if user:
+                    user.points += problem.points
+                    user.solved_count += 1
+                    print(f'📊 Обновлена статистика пользователя {tg_id}: +{problem.points} очков')
 
+                db.commit()
 
-@app.get("/api/profile/{tg_id}")
-async def profile(tg_id: int):
-    user = await services.get_user_by_tg(tg_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="user not found")
-    stats = await services.get_user_stats(user.id)
-    return {
-        'id': user.id,
-        'tg_id': user.tg_id,
-        'name': user.name,
-        'score': user.score,
-        'level': user.level,
-        'stats': stats
-    }
-
-
-@app.get("/api/stats/{tg_id}/weekly")
-async def get_weekly_stats(tg_id: int):
-    user = await services.get_user_by_tg(tg_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="user not found")
-    stats = await services.get_weekly_stats(user.id)
-    return stats
+                return SolveProblemResponse(
+                    correct=True,
+                    points_earned=problem.points,
+                    message='Правильно!'
+                )
+            else:
+                print(f'❌ Неправильный ответ для пользователя {tg_id}')
+                return SolveProblemResponse(
+                    correct=False,
+                    correct_answer=problem.correct_answer,
+                    message='Неправильно'
+                )
+        except Exception as e:
+            db.rollback()
+            print(f'❌ Ошибка при сохранении: {e}')
+            raise HTTPException(status_code=500, detail=f'Ошибка: {str(e)}')
+    else:
+        # Гость - просто проверяем ответ без сохранения
+        print(f'👤 Гость проверяет ответ (не сохраняем)')
+        return SolveProblemResponse(
+            correct=correct,
+            correct_answer=problem.correct_answer if not correct else '',
+            message='Правильно!' if correct else 'Неправильно'
+        )
