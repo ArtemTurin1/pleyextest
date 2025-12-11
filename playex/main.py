@@ -8,9 +8,10 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import uvicorn
+import asyncio
 
 # ===== DATABASE =====
-DATABASE_URL = "postgresql+asyncpg://botadmin:12345678@postgres:5432/playex_db"
+DATABASE_URL = "postgresql+asyncpg://user:password@playex_postgres:5432/playex_db"
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
@@ -84,6 +85,18 @@ class Task(Base):
     title = Column(String)
     is_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ===== ИНИЦИАЛИЗАЦИЯ ТАБЛИЦ =====
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    print("✅ Таблицы созданы успешно")
+
+
+@app.on_event("startup")
+async def startup_event():
+    await init_db()
 
 
 # ===== PYDANTIC MODELS =====
