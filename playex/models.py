@@ -77,8 +77,11 @@ class Task(Base):
 
 
 # ===== PYDANTIC MODELS =====
+from pydantic import BaseModel, ConfigDict
 
 class RegisterRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     tg_id: Optional[int] = None
     email: Optional[str] = None
     name: Optional[str] = None
@@ -86,11 +89,15 @@ class RegisterRequest(BaseModel):
 
 
 class SolveProblemRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     problem_id: int
     user_answer: str
 
 
 class SolveProblemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     correct: bool
     correct_answer: Optional[str] = None
     points_earned: Optional[int] = None
@@ -100,8 +107,9 @@ class SolveProblemResponse(BaseModel):
 
 
 class TaskRequest(BaseModel):
-    title: str
+    model_config = ConfigDict(from_attributes=True)
 
+    title: str
 
 async def init_db():
     """Создание всех таблиц"""
