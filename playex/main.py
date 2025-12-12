@@ -342,14 +342,11 @@ async def get_random_problem(subject: str, category_id: int = None, db: AsyncSes
 
 
 # ===== РЕШЕНИЕ ЗАДАЧ =====
+# ===== РЕШЕНИЕ ЗАДАЧ =====
 @app.post('/api/solve/')
 async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """
     Проверить решение задачи.
-
-    Может быть вызван:
-    1. Гостем (без авторизации) - проверяет ответ, НЕ сохраняет
-    2. Авторизованным пользователем (с X-TG-ID или X-EMAIL header) - проверяет и сохраняет баллы
     """
     try:
         problem_id = data.problem_id
@@ -359,8 +356,10 @@ async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSe
         tg_id = request.headers.get('X-TG-ID')
         email = request.headers.get('X-EMAIL')
 
+        print(f"🔍 DEBUG: problem_id={problem_id}, answer={user_answer}, tg_id={tg_id}, email={email}")
+
         # ПРОВЕРЯЕМ ЗАДАЧУ
-        result = await db.execute(select(Problem).filter(Problem.id == problem_id))
+        result = await db.execute(select(Problem).where(Problem.id == problem_id))
         problem = result.scalars().first()
 
         if not problem:
@@ -387,10 +386,10 @@ async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSe
         # ===== ЕСЛИ АВТОРИЗОВАН =====
         user = None
         if tg_id:
-            result = await db.execute(select(User).filter(User.tg_id == int(tg_id)))
+            result = await db.execute(select(User).where(User.tg_id == int(tg_id)))
             user = result.scalars().first()
         elif email:
-            result = await db.execute(select(User).filter(User.email == email))
+            result = await db.execute(select(User).where(User.email == email))
             user = result.scalars().first()
 
         if not user:
@@ -398,10 +397,10 @@ async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSe
 
         # Проверяем, уже ли решал эту задачу
         existing = await db.execute(
-            select(UserSolution).filter(
-                UserSolution.user_id == user.id,
-                UserSolution.problem_id == problem_id,
-                UserSolution.is_correct == True
+            select(UserSolution).where(
+                (UserSolution.user_id == user.id) &
+                (UserSolution.problem_id == problem_id) &
+                (UserSolution.is_correct == True)
             )
         )
 
@@ -455,6 +454,9 @@ async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSe
     except HTTPException:
         raise
     except Exception as e:
+        print(f"❌ ERROR in solve_problem: {str(e)}")
+        import traceback
+        traceback.print_exc()
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
