@@ -39,7 +39,7 @@ def _answer_to_set(answer: str) -> set:
     parts = re.split(r'[;,]', answer.strip())
     return {_normalize_answer(p) for p in parts if p.strip()}
 
-
+import asyncio
 # ===== STARTUP =====
 @app.on_event("startup")
 async def startup():
