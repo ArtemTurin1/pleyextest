@@ -23,7 +23,8 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=True)
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=True)
-    points: Mapped[int] = mapped_column(Integer, default=0)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    level: Mapped[int] = mapped_column(Integer, default=1)
     solved_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -54,6 +55,7 @@ class UserSolution(Base):
     __tablename__ = 'user_solutions'
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=True)
     tg_id: Mapped[int] = mapped_column(Integer, nullable=True)
     email: Mapped[str] = mapped_column(String(256), nullable=True)
     problem_id: Mapped[int] = mapped_column(ForeignKey('problems.id'), nullable=False)
@@ -66,6 +68,7 @@ class Task(Base):
     __tablename__ = 'tasks'
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=True)
     tg_id: Mapped[int] = mapped_column(Integer, nullable=True)
     email: Mapped[str] = mapped_column(String(256), nullable=True)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -74,6 +77,7 @@ class Task(Base):
 
 
 # ===== PYDANTIC MODELS =====
+
 class RegisterRequest(BaseModel):
     tg_id: Optional[int] = None
     email: Optional[str] = None
@@ -92,6 +96,7 @@ class SolveProblemResponse(BaseModel):
     points_earned: Optional[int] = None
     message: str
     already_solved: Optional[bool] = False
+    new_score: Optional[int] = None
 
 
 class TaskRequest(BaseModel):
