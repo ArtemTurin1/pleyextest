@@ -73,3 +73,11 @@ yarl==1.15.5
 zstandard==0.23.0
 sqlalchemy[asyncio]
 asyncpg
+fastapi
+uvicorn
+sqlalchemy
+asyncpg
+pydantic
+python-multipart
+passlib
+bcrypt
