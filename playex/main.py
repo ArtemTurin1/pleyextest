@@ -45,7 +45,6 @@ def _answer_to_set(answer: str) -> set:
 async def startup():
     """Инициализация БД при старте"""
     try:
-        await init_db()
         print("✅ Приложение запущено")
     except Exception as e:
         print(f"❌ Ошибка при запуске: {str(e)}")
