@@ -45,10 +45,27 @@ def _answer_to_set(answer: str) -> set:
 async def startup():
     """Инициализация БД при старте"""
     try:
-        await init_db()
-        print("✅ Приложение запущено")
+        # Пытаемся подключиться 5 раз с задержкой
+        max_retries = 5
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                await init_db()
+                print("✅ База данных инициализирована")
+                print("✅ Приложение запущено")
+                return
+            except Exception as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"⚠️ Попытка подключения {retry_count}/{max_retries} не удалась, ждём 2 сек...")
+                    await asyncio.sleep(2)
+                else:
+                    print(f"❌ Не удалось подключиться к БД после {max_retries} попыток")
+                    raise
+
     except Exception as e:
-        print(f"❌ Ошибка при запуске: {str(e)}")
+        print(f"❌ Критическая ошибка при запуске: {str(e)}")
         import traceback
         traceback.print_exc()
 
