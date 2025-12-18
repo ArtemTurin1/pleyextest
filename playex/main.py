@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from models import (
     engine, async_session, User, Problem, Category, UserSolution, Task, TimedAttempt,
-    RegisterRequest, SolveProblemRequest, TaskRequest, init_db
+    RegisterRequest, LoginRequest, SolveProblemRequest, TaskRequest, init_db
 )
 
 import re
@@ -83,38 +83,38 @@ async def health_check():
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Регистрация через Email"""
     try:
-        # Регистрация через Email
-        if data.email:
-            if not data.email:
-                raise HTTPException(status_code=400, detail='❌ Укажите email')
-            if not data.password:
-                raise HTTPException(status_code=400, detail='❌ Укажите пароль')
-            if not data.name:
-                raise HTTPException(status_code=400, detail='❌ Укажите имя')
-            if len(data.password) < 6:
-                raise HTTPException(status_code=400, detail='❌ Пароль должен быть минимум 6 символов')
+        if not data.email:
+            raise HTTPException(status_code=400, detail='❌ Укажите email')
+        if not data.password:
+            raise HTTPException(status_code=400, detail='❌ Укажите пароль')
+        if not data.name:
+            raise HTTPException(status_code=400, detail='❌ Укажите имя')
+        if len(data.password) < 6:
+            raise HTTPException(status_code=400, detail='❌ Пароль должен быть минимум 6 символов')
 
-            # ПРОВЕРКА НА ДУБЛЬ по email
-            result = await db.execute(select(User).where(User.email == data.email))
-            existing = result.scalars().first()
+        # ПРОВЕРКА НА ДУБЛЬ по email
+        result = await db.execute(select(User).where(User.email == data.email))
+        existing = result.scalars().first()
 
-            if existing:
-                raise HTTPException(status_code=400, detail='❌ Этот email уже зарегистрирован')
+        if existing:
+            raise HTTPException(status_code=400, detail='❌ Этот email уже зарегистрирован')
 
-            user = User(email=data.email, name=data.name, password_hash=data.password, user_type='email')
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
+        # Создаём пользователя БЕЗ user_type
+        user = User(
+            email=data.email,
+            name=data.name,
+            password_hash=data.password
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
 
-            return {
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "user_type": user.user_type,
-                "message": "✅ Успешно зарегистрированы через Email"
-            }
-        else:
-            raise HTTPException(status_code=400, detail='❌ Укажите Email')
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "message": "✅ Успешно зарегистрированы"
+        }
 
     except HTTPException:
         raise
@@ -150,7 +150,6 @@ async def login(data: dict, db: AsyncSession = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "user_type": user.user_type,
             "message": "✅ Вы успешно вошли"
         }
 
@@ -176,8 +175,7 @@ async def get_profile_email(email: str, db: AsyncSession = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "level": user.level,
-            "user_type": user.user_type
+            "level": user.level
         }
 
     except HTTPException:
@@ -198,10 +196,11 @@ async def update_profile(data: dict, request: Request, db: AsyncSession = Depend
         if not new_name:
             raise HTTPException(status_code=400, detail='❌ Укажите новое имя')
 
-        user = None
-        if email:
-            result = await db.execute(select(User).where(User.email == email))
-            user = result.scalars().first()
+        if not email:
+            raise HTTPException(status_code=400, detail='❌ Email не найден')
+
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalars().first()
 
         if not user:
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
@@ -624,7 +623,7 @@ async def get_timed_stats(subject: str = None, request: Request = None, db: Asyn
         print(f"❌ Ошибка получения статистики: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== ЗАДАЧИ =====
+# ===== ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ =====
 
 @app.get('/api/tasks/')
 async def get_tasks(request: Request, db: AsyncSession = Depends(get_db)):
