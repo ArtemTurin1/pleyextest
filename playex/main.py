@@ -86,10 +86,7 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
             if not data.name:
                 raise HTTPException(status_code=400, detail='❌ Укажите имя')
 
-            # Проверяем, существует ли такой пользователь в Telegram
-            # ВАЖНО: Здесь вы можете добавить проверку через Telegram Bot API
-            # Сейчас просто сохраняем username
-
+            # ПРОВЕРКА НА ДУБЛЬ по username
             result = await db.execute(select(User).where(User.tg_username == data.tg_username))
             existing = result.scalars().first()
 
@@ -128,17 +125,12 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
             if len(data.password) < 6:
                 raise HTTPException(status_code=400, detail='❌ Пароль должен быть минимум 6 символов')
 
+            # ПРОВЕРКА НА ДУБЛЬ по email
             result = await db.execute(select(User).where(User.email == data.email))
             existing = result.scalars().first()
 
             if existing:
-                return {
-                    "id": existing.id,
-                    "email": existing.email,
-                    "name": existing.name,
-                    "user_type": existing.user_type,
-                    "message": "⚠️ Этот email уже зарегистрирован"
-                }
+                raise HTTPException(status_code=400, detail='❌ Этот email уже зарегистрирован')
 
             user = User(email=data.email, name=data.name, password_hash=data.password, user_type='email')
             db.add(user)
@@ -161,6 +153,52 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         await db.rollback()
         print(f"❌ Ошибка регистрации: {str(e)}")
+        raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+
+
+# ===== ВХОД ЧЕРЕЗ TELEGRAM =====
+@app.post('/api/auth/telegram/login')
+async def login_telegram(data: dict, db: AsyncSession = Depends(get_db)):
+    """Вход через Telegram ID"""
+    try:
+        tg_id = data.get('tg_id')
+        name = data.get('name')
+
+        if not tg_id:
+            raise HTTPException(status_code=400, detail='❌ Укажите Telegram ID')
+
+        # Ищем пользователя по TG ID
+        result = await db.execute(select(User).where(User.tg_id == int(tg_id)))
+        user = result.scalars().first()
+
+        if not user:
+            # Создаём нового пользователя если не существует
+            if not name:
+                raise HTTPException(status_code=400, detail='❌ Укажите имя')
+
+            # ПРОВЕРКА НА ДУБЛЬ
+            result = await db.execute(select(User).where(User.tg_id == int(tg_id)))
+            if result.scalars().first():
+                raise HTTPException(status_code=400, detail='❌ Пользователь уже зарегистрирован')
+
+            user = User(tg_id=int(tg_id), name=name, user_type='telegram')
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+
+        return {
+            "id": user.id,
+            "tg_id": user.tg_id,
+            "name": user.name,
+            "user_type": user.user_type,
+            "message": "✅ Вы успешно вошли"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        print(f"❌ Ошибка входа Telegram: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
 
