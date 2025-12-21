@@ -1,23 +1,20 @@
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from models import (
     engine, async_session, User, Problem, Category, UserSolution, Task, TimedAttempt,
     RegisterRequest, LoginRequest, SolveProblemRequest, TaskRequest, init_db
 )
-
 import re
 from datetime import datetime
 import asyncio
 import random
 
 # ===== FASTAPI APP =====
-
 app = FastAPI(title="PlayEx API", version="1.0.0")
 
 # ===== CORS =====
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,25 +23,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ===== ЗАВИСИМОСТЬ БД =====
 
+# ===== ЗАВИСИМОСТЬ БД =====
 async def get_db():
     async with async_session() as session:
         yield session
 
-# ===== HELPER ФУНКЦИИ =====
 
+# ===== HELPER ФУНКЦИИ =====
 def _normalize_answer(answer: str) -> str:
     """Нормализует ответ для сравнения"""
     return answer.strip().lower().replace(' ', '')
+
 
 def _answer_to_set(answer: str) -> set:
     """Преобразует ответ в множество (для множественных ответов)"""
     parts = re.split(r'[;,]', answer.strip())
     return {_normalize_answer(p) for p in parts if p.strip()}
 
-# ===== STARTUP =====
 
+# ===== STARTUP =====
 @app.on_event("startup")
 async def startup():
     """Инициализация БД при старте"""
@@ -70,15 +68,15 @@ async def startup():
         import traceback
         traceback.print_exc()
 
-# ===== HEALTH CHECK =====
 
+# ===== HEALTH CHECK =====
 @app.get('/health')
 async def health_check():
     """Проверка здоровья сервера"""
     return {"status": "ok", "message": "✅ API работает"}
 
-# ===== РЕГИСТРАЦИЯ =====
 
+# ===== РЕГИСТРАЦИЯ =====
 @app.post('/api/users/register')
 async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Регистрация через Email"""
@@ -95,11 +93,10 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
         # ПРОВЕРКА НА ДУБЛЬ по email
         result = await db.execute(select(User).where(User.email == data.email))
         existing = result.scalars().first()
-
         if existing:
             raise HTTPException(status_code=400, detail='❌ Этот email уже зарегистрирован')
 
-        # Создаём пользователя БЕЗ user_type
+        # Создаём пользователя
         user = User(
             email=data.email,
             name=data.name,
@@ -115,7 +112,6 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
             "name": user.name,
             "message": "✅ Успешно зарегистрированы"
         }
-
     except HTTPException:
         raise
     except Exception as e:
@@ -123,8 +119,8 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
         print(f"❌ Ошибка регистрации: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== ЛОГИН =====
 
+# ===== ЛОГИН =====
 @app.post('/api/login/')
 async def login(data: dict, db: AsyncSession = Depends(get_db)):
     """Вход через Email"""
@@ -142,7 +138,6 @@ async def login(data: dict, db: AsyncSession = Depends(get_db)):
 
         if not user:
             raise HTTPException(status_code=401, detail='❌ Email не найден')
-
         if user.password_hash != password:
             raise HTTPException(status_code=401, detail='❌ Неверный пароль')
 
@@ -152,15 +147,14 @@ async def login(data: dict, db: AsyncSession = Depends(get_db)):
             "name": user.name,
             "message": "✅ Вы успешно вошли"
         }
-
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Ошибка логина: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== ПОЛУЧИТЬ ПРОФИЛЬ =====
 
+# ===== ПОЛУЧИТЬ ПРОФИЛЬ =====
 @app.get('/api/profile/email/{email}')
 async def get_profile_email(email: str, db: AsyncSession = Depends(get_db)):
     """Получить профиль по Email"""
@@ -177,15 +171,14 @@ async def get_profile_email(email: str, db: AsyncSession = Depends(get_db)):
             "name": user.name,
             "level": user.level
         }
-
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Ошибка получения профиля: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== ОБНОВИТЬ ИМЯ ПОЛЬЗОВАТЕЛЯ =====
 
+# ===== ОБНОВИТЬ ИМЯ ПОЛЬЗОВАТЕЛЯ =====
 @app.put('/api/profile/update')
 async def update_profile(data: dict, request: Request, db: AsyncSession = Depends(get_db)):
     """Обновить имя пользователя"""
@@ -195,7 +188,6 @@ async def update_profile(data: dict, request: Request, db: AsyncSession = Depend
 
         if not new_name:
             raise HTTPException(status_code=400, detail='❌ Укажите новое имя')
-
         if not email:
             raise HTTPException(status_code=400, detail='❌ Email не найден')
 
@@ -214,15 +206,14 @@ async def update_profile(data: dict, request: Request, db: AsyncSession = Depend
             "name": user.name,
             "message": "✅ Имя обновлено"
         }
-
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== СТАТИСТИКА =====
 
+# ===== СТАТИСТИКА =====
 @app.get('/api/stats/email/{email}')
 async def get_stats_email(email: str, db: AsyncSession = Depends(get_db)):
     """Получить статистику по Email"""
@@ -233,11 +224,8 @@ async def get_stats_email(email: str, db: AsyncSession = Depends(get_db)):
         if not user:
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
 
-        from sqlalchemy import func
-
         total_solved = await db.scalar(
-            select(func.count(UserSolution.id))
-            .where(
+            select(func.count(UserSolution.id)).where(
                 and_(
                     UserSolution.user_id == user.id,
                     UserSolution.is_correct == True
@@ -277,15 +265,14 @@ async def get_stats_email(email: str, db: AsyncSession = Depends(get_db)):
             "informatics_solved": int(informatics_solved),
             "solved_problems": []
         }
-
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Ошибка получения статистики: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== КАТЕГОРИИ =====
 
+# ===== КАТЕГОРИИ =====
 @app.get('/api/categories/')
 async def get_categories(subject: str = None, db: AsyncSession = Depends(get_db)):
     """Получить категории"""
@@ -293,10 +280,8 @@ async def get_categories(subject: str = None, db: AsyncSession = Depends(get_db)
         query = select(Category)
         if subject:
             query = query.where(Category.subject == subject)
-
         result = await db.execute(query)
         categories = result.scalars().all()
-
         return [
             {
                 "id": c.id,
@@ -306,10 +291,10 @@ async def get_categories(subject: str = None, db: AsyncSession = Depends(get_db)
             }
             for c in categories
         ]
-
     except Exception as e:
         print(f"❌ Ошибка загрузки категорий: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка загрузки категорий: {str(e)}')
+
 
 @app.post('/api/categories/')
 async def create_category(data: dict, db: AsyncSession = Depends(get_db)):
@@ -325,7 +310,6 @@ async def create_category(data: dict, db: AsyncSession = Depends(get_db)):
             subject=data['subject'],
             description=data.get('description')
         )
-
         db.add(category)
         await db.commit()
         await db.refresh(category)
@@ -336,7 +320,6 @@ async def create_category(data: dict, db: AsyncSession = Depends(get_db)):
             "subject": category.subject,
             "message": "✅ Категория создана"
         }
-
     except HTTPException:
         raise
     except Exception as e:
@@ -344,8 +327,8 @@ async def create_category(data: dict, db: AsyncSession = Depends(get_db)):
         print(f"❌ Ошибка создания категории: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== ЗАДАЧИ =====
 
+# ===== ЗАДАЧИ =====
 @app.get('/api/problems/')
 async def get_problems(subject: str = None, difficulty: str = None, category_id: int = None,
                        db: AsyncSession = Depends(get_db)):
@@ -361,6 +344,7 @@ async def get_problems(subject: str = None, difficulty: str = None, category_id:
             conditions.append(Problem.category_id == category_id)
         if conditions:
             query = query.where(and_(*conditions))
+
         result = await db.execute(query)
         problems = result.scalars().all()
 
@@ -371,9 +355,9 @@ async def get_problems(subject: str = None, difficulty: str = None, category_id:
                 "subject": p.subject,
                 "difficulty": p.difficulty,
                 "category_id": p.category_id,
-                "solution": p.solution,  # ✅ ДОБАВЛЯЕМ!
+                "solution": p.solution,
                 "correct_answer": p.correct_answer,
-                "points": 1  # Если нужны баллы (их нет в БД, но нужны в UI)
+                "points": 1
             }
             for p in problems
         ]
@@ -387,11 +371,9 @@ async def get_random_problem(subject: str, category_id: int = None, db: AsyncSes
     """Получить случайную задачу"""
     try:
         query = select(Problem).where(Problem.subject == subject)
-
         if category_id:
             query = query.where(Problem.category_id == category_id)
 
-        from sqlalchemy import func
         problem = await db.scalar(query.order_by(func.random()))
 
         if not problem:
@@ -405,14 +387,14 @@ async def get_random_problem(subject: str, category_id: int = None, db: AsyncSes
             "category_id": problem.category_id,
             "correct_answer": problem.correct_answer
         }
-
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Ошибка загрузки задачи: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
-# ===== РЕШЕНИЕ ЗАДАЧ =====
 
+
+# ===== РЕШЕНИЕ ЗАДАЧ =====
 @app.post('/api/solve/')
 async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Проверить решение"""
@@ -472,7 +454,6 @@ async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSe
             user_answer=user_answer,
             is_correct=is_correct
         )
-
         db.add(solution)
         await db.commit()
 
@@ -481,7 +462,6 @@ async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSe
             "correct_answer": None if is_correct else problem.correct_answer,
             "message": "✅ Верно!" if is_correct else "❌ Неверно"
         }
-
     except HTTPException:
         raise
     except Exception as e:
@@ -489,8 +469,8 @@ async def solve_problem(data: SolveProblemRequest, request: Request, db: AsyncSe
         print(f"❌ Ошибка решения: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
 
-# ===== ПОПЫТКИ НА ВРЕМЯ =====
 
+# ===== ПОПЫТКИ НА ВРЕМЯ =====
 @app.post('/api/timed-attempt/')
 async def save_timed_attempt(data: dict, request: Request, db: AsyncSession = Depends(get_db)):
     """Сохранить попытку на время"""
@@ -507,29 +487,50 @@ async def save_timed_attempt(data: dict, request: Request, db: AsyncSession = De
         if not user:
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
 
+        # Проверяем, не решал ли эту задачу на время
+        problem_id = data.get('problem_id')
+        subject = data.get('subject')
+        user_answer = data.get('user_answer')
+        time_spent = data.get('time_spent_seconds', 0)
+
+        # Получаем задачу для проверки
+        result = await db.execute(select(Problem).where(Problem.id == problem_id))
+        problem = result.scalars().first()
+
+        if not problem:
+            raise HTTPException(status_code=404, detail='❌ Задача не найдена')
+
+        # Сравниваем ответы для корректности
+        correct_raw = problem.correct_answer or ""
+        if re.search(r'[;,]', correct_raw):
+            is_correct = _answer_to_set(user_answer) == _answer_to_set(correct_raw)
+        else:
+            is_correct = _normalize_answer(user_answer) == _normalize_answer(correct_raw)
+
+        # Сохраняем попытку
         attempt = TimedAttempt(
             user_id=user.id,
-            problem_id=data.get('problem_id'),
-            subject=data.get('subject'),
-            user_answer=data.get('user_answer'),
-            is_correct=data.get('is_correct', False),
-            time_spent_seconds=data.get('time_spent_seconds', 0)
+            problem_id=problem_id,
+            subject=subject,
+            user_answer=user_answer,
+            is_correct=is_correct,
+            time_spent_seconds=time_spent
         )
-
         db.add(attempt)
         await db.commit()
+        await db.refresh(attempt)
 
         return {
             "id": attempt.id,
             "message": "✅ Попытка сохранена"
         }
-
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
         print(f"❌ Ошибка сохранения попытки: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+
 
 @app.get('/api/timed-stats/')
 async def get_timed_stats(subject: str = None, request: Request = None, db: AsyncSession = Depends(get_db)):
@@ -542,7 +543,9 @@ async def get_timed_stats(subject: str = None, request: Request = None, db: Asyn
                 "total_attempts": 0,
                 "correct_answers": 0,
                 "incorrect_answers": 0,
-                "success_rate": 0
+                "success_rate": 0,
+                "avg_problems_per_minute": 0,
+                "total_time_seconds": 0
             }
 
         # Получаем пользователя
@@ -552,37 +555,46 @@ async def get_timed_stats(subject: str = None, request: Request = None, db: Asyn
         if not user:
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
 
-        from sqlalchemy import func
-
+        # Получаем попытки
         query = select(TimedAttempt).where(TimedAttempt.user_id == user.id)
-
         if subject:
             query = query.where(TimedAttempt.subject == subject)
 
-        attempts = await db.execute(query)
-        attempts_list = attempts.scalars().all()
+        result = await db.execute(query)
+        attempts_list = result.scalars().all()
 
         total = len(attempts_list)
         correct = sum(1 for a in attempts_list if a.is_correct)
         incorrect = total - correct
-
         success_rate = (correct / total * 100) if total > 0 else 0
+
+        # Подсчитываем время и среднюю скорость
+        total_time = sum(a.time_spent_seconds for a in attempts_list)
+        avg_problems_per_minute = (total / (total_time / 60)) if total_time > 0 else 0
 
         return {
             "total_attempts": total,
             "correct_answers": correct,
             "incorrect_answers": incorrect,
-            "success_rate": success_rate
+            "success_rate": round(success_rate, 1),
+            "avg_problems_per_minute": round(avg_problems_per_minute, 2),
+            "total_time_seconds": total_time
         }
-
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Ошибка получения статистики: {str(e)}")
-        raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+        return {
+            "total_attempts": 0,
+            "correct_answers": 0,
+            "incorrect_answers": 0,
+            "success_rate": 0,
+            "avg_problems_per_minute": 0,
+            "total_time_seconds": 0
+        }
+
 
 # ===== ЗАДАЧИ ПОЛЬЗОВАТЕЛЯ =====
-
 @app.get('/api/tasks/')
 async def get_tasks(request: Request, db: AsyncSession = Depends(get_db)):
     """Получить задачи пользователя"""
@@ -600,10 +612,8 @@ async def get_tasks(request: Request, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
 
         # Получаем задачи
-        tasks = await db.execute(
-            select(Task).where(Task.user_id == user.id)
-        )
-        tasks_list = tasks.scalars().all()
+        result = await db.execute(select(Task).where(Task.user_id == user.id))
+        tasks_list = result.scalars().all()
 
         return [
             {
@@ -614,12 +624,12 @@ async def get_tasks(request: Request, db: AsyncSession = Depends(get_db)):
             }
             for t in tasks_list
         ]
-
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Ошибка загрузки задач: {str(e)}")
-        raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+        raise HTTPException(status_code=500, detail=f'❌ Ошибка загрузки задач: {str(e)}')
+
 
 @app.post('/api/tasks/')
 async def create_task(data: TaskRequest, request: Request, db: AsyncSession = Depends(get_db)):
@@ -638,7 +648,6 @@ async def create_task(data: TaskRequest, request: Request, db: AsyncSession = De
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
 
         task = Task(user_id=user.id, title=data.title)
-
         db.add(task)
         await db.commit()
         await db.refresh(task)
@@ -648,13 +657,13 @@ async def create_task(data: TaskRequest, request: Request, db: AsyncSession = De
             "title": task.title,
             "message": "✅ Задача создана"
         }
-
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
         print(f"❌ Ошибка создания задачи: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+
 
 @app.patch('/api/tasks/{task_id}/complete')
 async def complete_task(task_id: int, db: AsyncSession = Depends(get_db)):
@@ -674,13 +683,13 @@ async def complete_task(task_id: int, db: AsyncSession = Depends(get_db)):
             "is_completed": task.is_completed,
             "message": "✅ Задача выполнена"
         }
-
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
         print(f"❌ Ошибка отметки задачи: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+
 
 @app.delete('/api/tasks/{task_id}')
 async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
@@ -698,7 +707,6 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
         return {
             "message": "✅ Задача удалена"
         }
-
     except HTTPException:
         raise
     except Exception as e:
