@@ -370,7 +370,6 @@ async def get_problems(subject: str = None, difficulty: str = None, category_id:
             {
                 "id": p.id,
                 "title": p.title,
-                "description": p.description,
                 "subject": p.subject,
                 "difficulty": p.difficulty,
                 "category_id": p.category_id,
@@ -381,7 +380,7 @@ async def get_problems(subject: str = None, difficulty: str = None, category_id:
 
     except Exception as e:
         print(f"❌ Ошибка загрузки задач: {str(e)}")
-        raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+        raise HTTPException(status_code=500, detail=f'❌ Ошибка загрузки задач: {str(e)}')
 
 @app.get('/api/problems/random/')
 async def get_random_problem(subject: str, category_id: int = None, db: AsyncSession = Depends(get_db)):
@@ -401,7 +400,6 @@ async def get_random_problem(subject: str, category_id: int = None, db: AsyncSes
         return {
             "id": problem.id,
             "title": problem.title,
-            "description": problem.description,
             "subject": problem.subject,
             "difficulty": problem.difficulty,
             "category_id": problem.category_id,
@@ -413,46 +411,6 @@ async def get_random_problem(subject: str, category_id: int = None, db: AsyncSes
     except Exception as e:
         print(f"❌ Ошибка загрузки задачи: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
-
-@app.post('/api/problems/')
-async def create_problem(data: dict, db: AsyncSession = Depends(get_db)):
-    """Создать задачу"""
-    try:
-        if not data.get('title'):
-            raise HTTPException(status_code=400, detail='❌ Укажите название')
-        if not data.get('subject'):
-            raise HTTPException(status_code=400, detail='❌ Укажите предмет')
-        if not data.get('difficulty'):
-            raise HTTPException(status_code=400, detail='❌ Укажите сложность')
-        if not data.get('correct_answer'):
-            raise HTTPException(status_code=400, detail='❌ Укажите правильный ответ')
-
-        problem = Problem(
-            title=data['title'],
-            description=data.get('description', ''),
-            subject=data['subject'],
-            difficulty=data['difficulty'],
-            category_id=data.get('category_id'),
-            correct_answer=data['correct_answer']
-        )
-
-        db.add(problem)
-        await db.commit()
-        await db.refresh(problem)
-
-        return {
-            "id": problem.id,
-            "title": problem.title,
-            "message": "✅ Задача создана"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        print(f"❌ Ошибка создания задачи: {str(e)}")
-        raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
-
 # ===== РЕШЕНИЕ ЗАДАЧ =====
 
 @app.post('/api/solve/')
