@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from models import (
     engine, async_session, User, Problem, Category, UserSolution, Task, TimedAttempt,
     RegisterRequest, LoginRequest, SolveProblemRequest, TaskRequest, init_db
@@ -42,6 +42,20 @@ def _answer_to_set(answer: str) -> set:
     """Преобразует ответ в множество (для множественных ответов)"""
     parts = re.split(r'[;,]', answer.strip())
     return {_normalize_answer(p) for p in parts if p.strip()}
+
+def format_problem(p):
+    """Форматирует задачу в ответ API с решением и описанием"""
+    return {
+        "id": p.id,
+        "title": p.title,
+        "description": p.description,
+        "solution": p.solution if p.solution else None,
+        "subject": p.subject,
+        "difficulty": p.difficulty,
+        "category_id": p.category_id,
+        "correct_answer": p.correct_answer,
+        "points": p.points if hasattr(p, 'points') else 10
+    }
 
 # ===== STARTUP =====
 
@@ -233,8 +247,6 @@ async def get_stats_email(email: str, db: AsyncSession = Depends(get_db)):
         if not user:
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
 
-        from sqlalchemy import func
-
         total_solved = await db.scalar(
             select(func.count(UserSolution.id))
             .where(
@@ -348,7 +360,7 @@ async def create_category(data: dict, db: AsyncSession = Depends(get_db)):
 
 @app.get('/api/problems/')
 async def get_problems(subject: str = None, difficulty: str = None, category_id: int = None, db: AsyncSession = Depends(get_db)):
-    """Получить задачи"""
+    """Получить задачи с решениями и описанием"""
     try:
         query = select(Problem)
         conditions = []
@@ -366,17 +378,7 @@ async def get_problems(subject: str = None, difficulty: str = None, category_id:
         result = await db.execute(query)
         problems = result.scalars().all()
 
-        return [
-            {
-                "id": p.id,
-                "title": p.title,
-                "subject": p.subject,
-                "difficulty": p.difficulty,
-                "category_id": p.category_id,
-                "correct_answer": p.correct_answer
-            }
-            for p in problems
-        ]
+        return [format_problem(p) for p in problems]
 
     except Exception as e:
         print(f"❌ Ошибка загрузки задач: {str(e)}")
@@ -384,33 +386,26 @@ async def get_problems(subject: str = None, difficulty: str = None, category_id:
 
 @app.get('/api/problems/random/')
 async def get_random_problem(subject: str, category_id: int = None, db: AsyncSession = Depends(get_db)):
-    """Получить случайную задачу"""
+    """Получить случайную задачу с решением"""
     try:
         query = select(Problem).where(Problem.subject == subject)
 
         if category_id:
             query = query.where(Problem.category_id == category_id)
 
-        from sqlalchemy import func
         problem = await db.scalar(query.order_by(func.random()))
 
         if not problem:
             raise HTTPException(status_code=404, detail='❌ Задачи не найдены')
 
-        return {
-            "id": problem.id,
-            "title": problem.title,
-            "subject": problem.subject,
-            "difficulty": problem.difficulty,
-            "category_id": problem.category_id,
-            "correct_answer": problem.correct_answer
-        }
+        return format_problem(problem)
 
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Ошибка загрузки задачи: {str(e)}")
         raise HTTPException(status_code=500, detail=f'❌ Ошибка: {str(e)}')
+
 # ===== РЕШЕНИЕ ЗАДАЧ =====
 
 @app.post('/api/solve/')
@@ -551,8 +546,6 @@ async def get_timed_stats(subject: str = None, request: Request = None, db: Asyn
 
         if not user:
             raise HTTPException(status_code=404, detail='❌ Пользователь не найден')
-
-        from sqlalchemy import func
 
         query = select(TimedAttempt).where(TimedAttempt.user_id == user.id)
 
