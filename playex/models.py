@@ -98,7 +98,6 @@ class SolveProblemResponse(BaseModel):
 class TaskRequest(BaseModel):
     title: str
 
-# ===== DATABASE INIT =====
 
 async def init_db():
     """Создание всех таблиц"""
