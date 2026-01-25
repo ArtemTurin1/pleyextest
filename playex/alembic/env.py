@@ -14,8 +14,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# ✅ ПРАВИЛЬНЫЙ ИМПОРТ
-from playex.models import Base
+import sys
+from pathlib import Path
+
+# Добавляем parent directory в sys.path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from playex.bacend.models import Base
 import os
 from dotenv import load_dotenv
 

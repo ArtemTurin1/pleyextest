@@ -2,15 +2,13 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
-from models import (
-    engine, async_session, User, Problem, Category, UserSolution, Task, TimedAttempt,
-    RegisterRequest, LoginRequest, SolveProblemRequest, TaskRequest, init_db
+from playex.bacend.models import (
+    async_session, User, Problem, Category, UserSolution, Task, TimedAttempt,
+    RegisterRequest, SolveProblemRequest, TaskRequest, init_db
 )
 
 import re
-from datetime import datetime
 import asyncio
-import random
 
 # ===== FASTAPI APP =====
 
