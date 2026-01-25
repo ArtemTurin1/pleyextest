@@ -20,8 +20,6 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=True)
-    level: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class Category(Base):
     __tablename__ = 'categories'
