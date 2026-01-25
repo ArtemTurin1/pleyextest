@@ -35,10 +35,6 @@ class Problem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(128), nullable=False)
     solution: Mapped[str] = mapped_column(Text, nullable=True)
-    subject: Mapped[str] = mapped_column(String(50), nullable=False)  # 'math', 'informatics'
-    difficulty: Mapped[str] = mapped_column(String(50), nullable=False)
-    category_id: Mapped[int] = mapped_column(Integer, nullable=True)
-    correct_answer: Mapped[str] = mapped_column(String(256), nullable=False)
 
 class UserSolution(Base):
     __tablename__ = 'user_solutions'
