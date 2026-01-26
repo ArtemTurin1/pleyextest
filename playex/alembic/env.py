@@ -19,7 +19,7 @@ from pathlib import Path
 
 # Добавляем parent directory в sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from playex.bacend.models import Base
+from playex.models import Base
 import os
 from dotenv import load_dotenv
 

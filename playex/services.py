@@ -1,5 +1,5 @@
 from sqlalchemy import select, update, delete, func, desc, and_
-from models import async_session, User, Problem, UserSolution, Category
+from playex.models import async_session, User, Problem, UserSolution, Category
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from typing import List, Optional
